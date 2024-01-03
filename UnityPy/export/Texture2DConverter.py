@@ -100,6 +100,9 @@ def get_image_from_texture2d(texture_2d, flip=True) -> Image.Image:
     :rtype: Image
     """
     image_data = copy(bytes(texture_2d.image_data))
+    if len(image_data) == 0 and hasattr(texture_2d, "m_StreamData"):
+        image_data = bytes(texture_2d.m_StreamData.resolve())
+    
     if not image_data:
         raise ValueError("Texture2D has no image data")
 

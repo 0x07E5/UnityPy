@@ -1,6 +1,8 @@
 import ctypes
 import os
 import platform
+
+from ..classes.generated import AudioClip
 from UnityPy.streams import EndianBinaryWriter
 
 # pyfmodex loads the dll/so/dylib on import
@@ -68,28 +70,39 @@ def import_pyfmodex():
     import pyfmodex
 
 
-def extract_audioclip_samples(audio) -> dict:
+def extract_audioclip_samples(clip: AudioClip) -> dict:
     """extracts all the samples from an AudioClip
     :param audio: AudioClip
     :type audio: AudioClip
     :return: {filename : sample(bytes)}
     :rtype: dict
     """
-    if not audio.m_AudioData:
+    data = getattr(clip, "m_AudioData", None)
+    if data:
+        data = bytes(data)
+    elif hasattr(clip, "m_Resource"):
+        data = clip.m_Resource.resolve()
+
+    if not data:
         # eg. StreamedResource not available
         return {}
 
-    magic = memoryview(audio.m_AudioData)[:8]
+    magic = memoryview(data)[:8]
+
+    ext = None
     if magic[:4] == b"OggS":
-        return {f"{audio.m_Name}.ogg": audio.m_AudioData}
+        ext = "ogg"
     elif magic[:4] == b"RIFF":
-        return {f"{audio.m_Name}.wav": audio.m_AudioData}
+        ext = "wav"
     elif magic[4:8] == b"ftyp":
-        return {f"{audio.m_Name}.m4a": audio.m_AudioData}
-    return dump_samples(audio)
+        ext = "m4a"
+    else:
+        return dump_samples(clip, bytes(data))
+
+    return {f"{clip.m_Name}.{ext}": data}
 
 
-def dump_samples(clip):
+def dump_samples(clip: AudioClip, data: bytes):
     if pyfmodex is None:
         import_pyfmodex()
     if not pyfmodex:
@@ -99,10 +112,10 @@ def dump_samples(clip):
     system.init(clip.m_Channels, pyfmodex.flags.INIT_FLAGS.NORMAL, None)
 
     sound = system.create_sound(
-        bytes(clip.m_AudioData),
+        data,
         pyfmodex.flags.MODE.OPENMEMORY,
         exinfo=pyfmodex.structure_declarations.CREATESOUNDEXINFO(
-            length=clip.m_Size,
+            length=len(data),
             numchannels=clip.m_Channels,
             defaultfrequency=clip.m_Frequency,
         ),
@@ -112,9 +125,9 @@ def dump_samples(clip):
     samples = {}
     for i in range(sound.num_subsounds):
         if i > 0:
-            filename = "%s-%i.wav" % (clip.name, i)
+            filename = "%s-%i.wav" % (clip.m_Name, i)
         else:
-            filename = "%s.wav" % clip.name
+            filename = "%s.wav" % clip.m_Name
         subsound = sound.get_subsound(i)
         samples[filename] = subsound_to_wav(subsound)
         subsound.release()

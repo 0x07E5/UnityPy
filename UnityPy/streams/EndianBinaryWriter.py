@@ -1,7 +1,8 @@
+from __future__ import annotations
 import io
 from struct import pack
 
-from ..math import Color, Matrix4x4, Quaternion, Vector2, Vector3, Vector4, Rectangle
+from .. import classes
 
 
 class EndianBinaryWriter:
@@ -96,47 +97,47 @@ class EndianBinaryWriter:
         align = (alignment - pos % alignment) % alignment
         self.write(b"\0" * align)
 
-    def write_quaternion(self, value: Quaternion):
-        self.write_float(value.X)
-        self.write_float(value.Y)
-        self.write_float(value.Z)
-        self.write_float(value.W)
+    def write_quaternion(self, value: classes.Quaternionf):
+        self.write_float(value.x)
+        self.write_float(value.y)
+        self.write_float(value.z)
+        self.write_float(value.w)
 
-    def write_vector2(self, value: Vector2):
-        self.write_float(value.X)
-        self.write_float(value.Y)
+    def write_vector2(self, value: classes.Vector2f):
+        self.write_float(value.x)
+        self.write_float(value.y)
 
-    def write_vector3(self, value: Vector3):
-        self.write_float(value.X)
-        self.write_float(value.Y)
-        self.write_float(value.Z)
+    def write_vector3(self, value: classes.Vector3f):
+        self.write_float(value.x)
+        self.write_float(value.y)
+        self.write_float(value.z)
 
-    def write_vector4(self, value: Vector4):
-        self.write_float(value.X)
-        self.write_float(value.Y)
-        self.write_float(value.Z)
-        self.write_float(value.W)
+    def write_vector4(self, value: classes.Vector4f):
+        self.write_float(value.x)
+        self.write_float(value.y)
+        self.write_float(value.z)
+        self.write_float(value.w)
 
-    def write_rectangle_f(self, value: Rectangle):
+    def write_rectangle_f(self, value: classes.Rectf):
         self.write_float(value.x)
         self.write_float(value.y)
         self.write_float(value.width)
         self.write_float(value.height)
 
-    def write_color_uint(self, value: Color):
-        self.write_u_byte(value.R * 255)
-        self.write_u_byte(value.G * 255)
-        self.write_u_byte(value.B * 255)
-        self.write_u_byte(value.A * 255)
+    def write_color_uint(self, value: classes.ColorRGBA):
+        self.write_u_byte(value.r * 255)
+        self.write_u_byte(value.g * 255)
+        self.write_u_byte(value.b * 255)
+        self.write_u_byte(value.a * 255)
 
-    def write_color4(self, value: Color):
-        self.write_float(value.R)
-        self.write_float(value.G)
-        self.write_float(value.B)
-        self.write_float(value.A)
+    def write_color4(self, value: classes.ColorRGBA):
+        self.write_float(value.r)
+        self.write_float(value.g)
+        self.write_float(value.b)
+        self.write_float(value.a)
 
-    def write_matrix(self, value: Matrix4x4):
-        for val in value.M:
+    def write_matrix(self, value: classes.Matrix4x4f):
+        for val in value.to_list():
             self.write_float(val)
 
     def write_array(self, command, value: list, write_length: bool = True):

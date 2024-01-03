@@ -1,57 +1,19 @@
-﻿from typing import Any, Dict, List, Union, Iterable, Tuple
-from ..streams import EndianBinaryReader, EndianBinaryWriter
-from ctypes import c_uint32
+﻿from ctypes import c_uint32
+from typing import Any, Dict, List, Union, Iterable, Tuple
+import re
+
 import tabulate
+
+from .TypeTreeNode import TypeTreeNode
+from ..streams import EndianBinaryReader, EndianBinaryWriter
 from ..exceptions import TypeTreeError as TypeTreeError
+from .. import classes as Classes
 
 kAlignBytes = 0x4000
 
 
-class TypeTreeNode(object):
-    __slots__ = (
-        "m_Version",
-        "m_Level",
-        "m_TypeFlags",
-        "m_ByteSize",
-        "m_Index",
-        "m_MetaFlag",
-        "m_Type",
-        "m_Name",
-        "m_TypeStrOffset",
-        "m_NameStrOffset",
-        "m_RefTypeHash",
-        "m_VariableCount",
-    )
-    m_Type: str
-    m_Name: str
-    m_ByteSize: int
-    m_Index: int
-    m_Version: int
-    m_MetaFlag: int
-    m_Level: int
-    m_TypeStrOffset: int
-    m_NameStrOffset: int
-    m_RefTypeHash: str
-    m_TypeFlags: int
-    m_VariableCount: int
-
-    def __init__(self, data: Union[dict, Iterable[Tuple]] = None, **kwargs):
-        if isinstance(data, dict):
-            items = data.items()
-        elif kwargs:
-            items = kwargs.items()
-        else:
-            items = data
-
-        for key, val in items:
-            setattr(self, key, val)
-
-    def __repr__(self):
-        return f"<TypeTreeNode({self.m_Level} {self.m_Type} {self.m_Name})>"
-
-
 try:
-    from ..UnityPyBoost import TypeTreeNode, read_typetree as read_typetree_c
+    from ..UnityPyBoost import read_typetree as read_typetree_c
 except:
     read_typetree_c = None
 
@@ -132,7 +94,9 @@ def get_nodes(nodes: List[TypeTreeNode], index: int) -> list:
 
 
 def read_typetree(
-    nodes: List[Union[dict, TypeTreeNode]], reader: EndianBinaryReader
+    nodes: List[Union[dict, TypeTreeNode]],
+    reader: EndianBinaryReader,
+    as_dict: bool = True,
 ) -> dict:
     """Reads the typetree of the object contained in the reader via the node list.
 
@@ -152,12 +116,12 @@ def read_typetree(
 
     nodes = check_nodes(nodes)
 
-    if read_typetree_c:
+    if read_typetree_c and as_dict:
         return read_typetree_c(
             nodes, reader.read_bytes(reader.byte_size), reader.endian
         )
 
-    obj = read_value(nodes, reader, c_uint32(0))
+    obj = read_value(nodes, reader, c_uint32(0), as_dict)
 
     read = reader.Position - reader.byte_start
     if read != reader.byte_size:
@@ -169,7 +133,9 @@ def read_typetree(
     return obj
 
 
-def read_value(nodes: List[TypeTreeNode], reader: EndianBinaryReader, i: c_uint32):
+def read_value(
+    nodes: List[TypeTreeNode], reader: EndianBinaryReader, i: c_uint32, as_dict: bool
+):
     node = nodes[i.value]
     typ = node.m_Type
     align = (node.m_MetaFlag & kAlignBytes) != 0
@@ -209,12 +175,18 @@ def read_value(nodes: List[TypeTreeNode], reader: EndianBinaryReader, i: c_uint3
         size = reader.read_int()
         value = [None] * size
         for j in range(size):
-            key = read_value(first, reader, c_uint32(0))
-            value[j] = (key, read_value(second, reader, c_uint32(0)))
+            key = read_value(first, reader, c_uint32(0), as_dict)
+            value[j] = (key, read_value(second, reader, c_uint32(0), as_dict))
     elif typ == "TypelessData":
         size = reader.read_int()
         value = reader.read_bytes(size)
         i.value += 2  # Size == int, Data(typ) == char/uint8
+    elif typ == "pair":
+        i.value += 1
+        first = read_value(nodes, reader, i, as_dict)
+        i.value += 1
+        second = read_value(nodes, reader, i, as_dict)
+        value = (first, second)
     else:
         # Vector
         if i.value < len(nodes) - 1 and nodes[i.value + 1].m_Type == "Array":
@@ -223,16 +195,25 @@ def read_value(nodes: List[TypeTreeNode], reader: EndianBinaryReader, i: c_uint3
             vector = get_nodes(nodes, i.value)
             i.value += len(vector) - 1
             size = reader.read_int()
-            value = [read_value(vector, reader, c_uint32(3)) for _ in range(size)]
+            value = [
+                read_value(vector, reader, c_uint32(3), as_dict) for _ in range(size)
+            ]
         else:  # Class
             clz = get_nodes(nodes, i.value)
             i.value += len(clz) - 1
+            
             value = {}
             j = c_uint32(1)
             while j.value < len(clz):
                 clz_node = clz[j.value]
-                value[clz_node.m_Name] = read_value(clz, reader, j)
+                value[clz_node.m_Name] = read_value(clz, reader, j, as_dict)
                 j.value += 1
+
+            if not as_dict:
+                value = getattr(
+                    Classes, "PPtr" if typ.startswith("PPtr") else typ, Classes.Object
+                )(**{clean_name(key): value for key,value in value.items()})
+                value._reader = reader
 
     if align:
         reader.align_stream()
@@ -522,3 +503,16 @@ def write_value(
 
     if align:
         writer.align_stream()
+
+
+def clean_name(name: str) -> str:
+    if name.startswith("(int&)"):
+        name = name[6:]
+    if name.endswith("?"):
+        name = name[:-1]
+    name = re.sub("[ \.:\-\[\]]", "_", name)
+    if name in ["pass", "from"]:
+        name += "_"
+    if name[0].isdigit():
+        name = f"_{name}"
+    return name

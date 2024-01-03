@@ -288,7 +288,7 @@ class SerializedFile(File.File):
         # read the asset_bundles to get the containers
         for obj in self.objects.values():
             if obj.type == ClassIDType.AssetBundle:
-                self.assetbundle = obj.read_typetree(wrap=True)
+                self.assetbundle = obj.read()
                 self._container = ContainerHelper(self.assetbundle.m_Container)
                 break
         else:
@@ -653,7 +653,7 @@ class ContainerHelper:
         self.container = container
         # support for getitem
         self.container_dict = {key: value.asset for key, value in container}
-        self.path_dict = {value.asset.path_id: key for key, value in container}
+        self.path_dict = {value.asset.m_PathID: key for key, value in container}
 
     def items(self):
         return ((key, value.asset) for key, value in self.container)

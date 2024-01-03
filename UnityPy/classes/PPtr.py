@@ -1,90 +1,77 @@
+from dataclasses import dataclass
+from typing import TypeVar, Generic, Union
+
 from ..files import ObjectReader
-from ..streams import EndianBinaryWriter
 from ..enums import ClassIDType
 
+T = TypeVar("T")
 
-def save_ptr(obj, writer: EndianBinaryWriter):
-    if isinstance(obj, PPtr):
-        writer.write_int(obj.file_id)
-    else:
-        writer.write_int(0)  # it's usually 0......
-    if obj._version < 14:
-        writer.write_int(obj.path_id)
-    else:
-        writer.write_long(obj.path_id)
+@dataclass
+class PPtr(Generic[T]):
+    m_FileID: int
+    m_PathID: int
+    _reader: ObjectReader
+    _obj: Union[ObjectReader, None] = None
+    
+    def __init__(self, m_FileID: int, m_PathID: int):
+        self.m_FileID = m_FileID
+        self.m_PathID = m_PathID
 
-
-class PPtr:
-    def __init__(self, reader: ObjectReader):
-        self._version = reader.version2
-        self.index = -2
-        self.file_id = reader.read_int()
-        self.path_id = reader.read_int() if self._version < 14 else reader.read_long()
-        self.assets_file = reader.assets_file
-        self._obj = None
-
-    def save(self, writer: EndianBinaryWriter):
-        save_ptr(self, writer)
-
-    def get_obj(self):
-        if self._obj != None:
+    def deref(self) -> ObjectReader:
+        if self._obj is not None:
             return self._obj
 
         manager = None
+        assetsfile = self._reader.assets_file
 
-        if self.file_id == 0:
-            manager = self.assets_file
+        if self.m_FileID == 0:
+            manager = assetsfile
 
-        elif self.file_id > 0 and self.file_id - 1 < len(self.assets_file.externals):
+        elif self.m_FileID > 0 and self.m_FileID - 1 < len(assetsfile.externals):
             if self.index == -2:
-                environment = self.assets_file.environment
+                environment = assetsfile.environment
                 external_name = self.external_name
                 # try to find it in the already registered cabs
                 manager = environment.get_cab(external_name)
                 # not found, load all dependencies and try again
                 if not manager:
-                    self.assets_file.load_dependencies([external_name])
+                    assetsfile.load_dependencies([external_name])
                     manager = environment.get_cab(external_name)
 
         if manager is not None:
-            self._obj = manager.objects.get(self.path_id)
-        else:
-            self._obj = None
-            if self.external_name:
-                print(f"Couldn't find dependency {self.external_name}")
-                print("You can try to load it manually to the environment in advance")
-                print("for Web-&BundleFiles: env.load_file(dependency)")
-                print(
-                    "for SerializedFiles: env.register_cab(depdency_basename, env.load_file(dependency)"
-                )
-            elif self.path_id:
-                print(f"Couldn't find referenced object with path_id {self.path_id}")
+            self._obj = manager.objects.get(self.m_PathID)
+
+        if self._obj is None:
+            # TODO: add more details to error
+            raise FileNotFoundError("Failed to resolve pointer!")
 
         return self._obj
 
+    def deref_read(self) -> T:
+        return self.deref().read()
+
     @property
     def type(self):
-        obj = self.get_obj()
+        obj = self.deref()
         if obj is None:
             return ClassIDType.UnknownType
         return obj.type
 
     @property
     def external_name(self):
-        if self.file_id > 0 and self.file_id - 1 < len(self.assets_file.externals):
-            return self.assets_file.externals[self.file_id - 1].name
-
-    def __getattr__(self, key):
-        obj = self.get_obj()
-        return getattr(obj, key)
+        assetsfile = self._reader.assets_file
+        if self.m_FileId > 0 and self.m_FileId - 1 < len(assetsfile.externals):
+            return assetsfile.externals[self.m_FileId - 1].name
 
     def __repr__(self):
-        return "<%s %s>" % (
-            self.__class__.__name__,
-            self._obj.__class__.__repr__(self.get_obj())
-            if self.get_obj()
-            else "Not Found",
-        )
+        try:
+            return f"PPtr<{self.deref().__class__.__repr__(self.deref())}>"
+        except Exception as e:
+            return f"PPtr<{e}>"
 
     def __bool__(self):
-        return True if self.get_obj() else False
+        try:
+            self.deref()
+            return True
+        except:
+            return False

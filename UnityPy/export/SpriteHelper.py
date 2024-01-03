@@ -1,56 +1,88 @@
-from enum import IntEnum, IntFlag
-
 from PIL import Image, ImageDraw
 
 from .Texture2DConverter import get_image_from_texture2d
-from ..enums import ClassIDType, SpritePackingMode, SpritePackingRotation
+from ..classes import Sprite, Texture2D, PPtr
+from ..enums import (
+    ClassIDType,
+    SpritePackingMode,
+    SpritePackingRotation,
+    SpriteMeshType,
+)
 from ..streams import EndianBinaryReader
 
 
-def get_image(sprite, texture, alpha_texture) -> Image.Image:
+class SpriteSettings:
+    def __init__(self, settingsRaw: int):
+        self.settingsRaw = settingsRaw
+
+    @property
+    def packed(self):
+        return self.settingsRaw & 1
+
+    @property
+    def packingMode(self):
+        return SpritePackingMode((self.settingsRaw >> 1) & 1)
+
+    @property
+    def packingRotation(self):
+        return SpritePackingRotation((self.settingsRaw >> 2) & 0xF)
+
+    @property
+    def meshType(self):
+        return SpriteMeshType((self.settingsRaw >> 6) & 1)
+
+
+def get_image(
+    sprite: Sprite, texture: PPtr[Texture2D], alpha_texture: PPtr[Texture2D]
+) -> Image.Image:
     if (
         alpha_texture
         and getattr(alpha_texture, "type", ClassIDType.UnknownType)
         == ClassIDType.Texture2D
     ):
-        cache_id = (texture.path_id, alpha_texture.path_id)
+        cache_id = (texture.m_PathID, alpha_texture.m_PathID)
         if cache_id not in sprite.assets_file._cache:
-            original_image = get_image_from_texture2d(texture.read(), False)
-            alpha_image = get_image_from_texture2d(alpha_texture.read(), False)
+            original_image = get_image_from_texture2d(texture.deref_read(), False)
+            alpha_image = get_image_from_texture2d(alpha_texture.deref_read(), False)
             original_image = Image.merge(
                 "RGBA", (*original_image.split()[:3], alpha_image.split()[0])
             )
             sprite.assets_file._cache[cache_id] = original_image
     else:
-        cache_id = texture.path_id
+        cache_id = texture.m_PathID
         if cache_id not in sprite.assets_file._cache:
-            original_image = get_image_from_texture2d(texture.read(), False)
+            original_image = get_image_from_texture2d(texture.deref_read(), False)
             sprite.assets_file._cache[cache_id] = original_image
     return sprite.assets_file._cache[cache_id]
 
 
-def get_image_from_sprite(m_Sprite) -> Image.Image:
+def get_image_from_sprite(m_Sprite: Sprite) -> Image.Image:
     atlas = None
     if getattr(m_Sprite, "m_SpriteAtlas", None):
-        atlas = m_Sprite.m_SpriteAtlas.read()
+        if m_Sprite.m_SpriteAtlas:
+            atlas = m_Sprite.m_SpriteAtlas.deref_read()
     elif getattr(m_Sprite, "m_AtlasTags", None):
         # looks like the direct pointer is empty, let's try to find the Atlas via its name
         for obj in m_Sprite.assets_file.objects.values():
             if obj.type == ClassIDType.SpriteAtlas:
                 atlas = obj.read()
-                if atlas.name == m_Sprite.m_AtlasTags[0]:
+                if atlas.m_Name == m_Sprite.m_AtlasTags[0]:
                     break
                 atlas = None
 
     if atlas:
-        sprite_atlas_data = atlas.m_RenderDataMap[m_Sprite.m_RenderDataKey]
+        for key, sprite_atlas_data in atlas.m_RenderDataMap:
+            if key == m_Sprite.m_RenderDataKey:
+                break
+        else:
+            raise FileNotFoundError("Failed to find sprite atlas!")
     else:
         sprite_atlas_data = m_Sprite.m_RD
 
     m_Texture2D = sprite_atlas_data.texture
     alpha_texture = sprite_atlas_data.alphaTexture
     texture_rect = sprite_atlas_data.textureRect
-    settings_raw = sprite_atlas_data.settingsRaw
+    settings_raw = SpriteSettings(sprite_atlas_data.settingsRaw)
 
     original_image = get_image(m_Sprite, m_Texture2D, alpha_texture)
 
@@ -100,7 +132,7 @@ def get_image_from_sprite(m_Sprite) -> Image.Image:
     return sprite_image.transpose(Image.FLIP_TOP_BOTTOM)
 
 
-def get_triangles(m_Sprite):
+def get_triangles(m_Sprite: Sprite):
     """
     returns the triangles of the sprite polygon
     """
@@ -108,15 +140,16 @@ def get_triangles(m_Sprite):
 
     # read the raw points
     points = []
-    if hasattr(m_RD, "vertices"):  # 5.6 down
+    if m_RD.vertices is not None:  # 5.6 down
         vertices = [v.pos for v in m_RD.vertices]
         points = [vertices[index] for index in m_RD.indices]
     else:  # 5.6 and up
-        m_Channel = m_RD.m_VertexData.m_Channels[0]  # kShaderChannelVertex
-        m_Stream = m_RD.m_VertexData.m_Streams[m_Channel.stream]
+        vertexdata = m_RD.m_VertexData.unpack()
+        m_Channel = vertexdata.m_Channels[0]  # kShaderChannelVertex
+        m_Stream = vertexdata.m_Streams[m_Channel.stream]
 
-        vertexReader = EndianBinaryReader(m_RD.m_VertexData.m_DataSize, endian="<")
-        indexReader = EndianBinaryReader(m_RD.m_IndexBuffer, endian="<")
+        vertexReader = EndianBinaryReader(vertexdata.m_DataSize, endian="<")
+        indexReader = EndianBinaryReader(bytearray(m_RD.m_IndexBuffer), endian="<")
 
         for subMesh in m_RD.m_SubMeshes:
             vertexReader.Position = (
@@ -140,10 +173,10 @@ def get_triangles(m_Sprite):
     # normalize the points
     #  shift the whole point matrix into the positive space
     #  multiply them with a factor to scale them to the image
-    min_x = min(p.X for p in points)
-    min_y = min(p.Y for p in points)
+    min_x = min(p.x for p in points)
+    min_y = min(p.y for p in points)
     factor = m_Sprite.m_PixelsToUnits
-    points = [((p.X - min_x) * factor, (p.Y - min_y) * factor) for p in points]
+    points = [((p.x - min_x) * factor, (p.y - min_y) * factor) for p in points]
 
     # generate triangles from the given points
     return [points[i : i + 3] for i in range(0, len(points), 3)]

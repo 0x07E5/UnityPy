@@ -1,4 +1,13 @@
-# UnityPy
+# UnityPy - Dev
+
+## TODO
+- likely issues with MeshExport in some versions
+- MeshRendererExport
+- replace math classes with numpy versions
+- use numpy in general
+- use UnityVersion classes instead of tuple
+
+## Readme
 
 [![Discord server invite](https://discordapp.com/api/guilds/603359898507673630/embed.png)](https://discord.gg/C6txv7M)
 [![PyPI supported Python versions](https://img.shields.io/pypi/pyversions/UnityPy.svg)](https://pypi.python.org/pypi/UnityPy)

@@ -1,14 +1,15 @@
+from __future__ import annotations
 import sys
 from struct import Struct, unpack
 import re
 from typing import List, Union
 from io import BytesIO, BufferedIOBase, IOBase, BufferedReader
 
+from .. import classes
+
 reNot0 = re.compile(b"(.*?)\x00", re.S)
 
 SYS_ENDIAN = "<" if sys.byteorder == "little" else ">"
-
-from ..math import Color, Matrix4x4, Quaternion, Vector2, Vector3, Vector4, Rectangle
 
 # generate unpack and unpack_from functions
 TYPE_PARAM_SIZE_LIST = [
@@ -157,25 +158,36 @@ class EndianBinaryReader:
     def align_stream(self, alignment=4):
         self.Position += (alignment - self.Position % alignment) % alignment
 
-    def read_quaternion(self) -> Quaternion:
-        return Quaternion(
-            self.read_float(), self.read_float(), self.read_float(), self.read_float()
+    def read_quaternion(self) -> classes.Quaternionf:
+        return classes.Quaternionf(
+            x=self.read_float(),
+            y=self.read_float(),
+            z=self.read_float(),
+            w=self.read_float(),
         )
 
-    def read_vector2(self) -> Vector2:
-        return Vector2(self.read_float(), self.read_float())
+    def read_vector2(self) -> classes.Vector2f:
+        return classes.Vector2f(x=self.read_float(), y=self.read_float())
 
-    def read_vector3(self) -> Vector3:
-        return Vector3(self.read_float(), self.read_float(), self.read_float())
-
-    def read_vector4(self) -> Vector4:
-        return Vector4(
-            self.read_float(), self.read_float(), self.read_float(), self.read_float()
+    def read_vector3(self) -> classes.Vector3f:
+        return classes.Vector3f(
+            x=self.read_float(), y=self.read_float(), z=self.read_float()
         )
 
-    def read_rectangle_f(self) -> Rectangle:
-        return Rectangle(
-            self.read_float(), self.read_float(), self.read_float(), self.read_float()
+    def read_vector4(self) -> classes.Vector4f:
+        return classes.Vector4f(
+            x=self.read_float(),
+            y=self.read_float(),
+            z=self.read_float(),
+            w=self.read_float(),
+        )
+
+    def read_rectangle_f(self) -> classes.Rectf:
+        return classes.Rectf(
+            x=self.read_float(),
+            y=self.read_float(),
+            width=self.read_float(),
+            height=self.read_float(),
         )
 
     def read_color_uint(self):
@@ -184,18 +196,21 @@ class EndianBinaryReader:
         b = self.read_u_byte()
         a = self.read_u_byte()
 
-        return Color(r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+        return classes.ColorRGBA(r / 255.0, g / 255.0, b / 255.0, a / 255.0)
 
-    def read_color4(self) -> Color:
-        return Color(
-            self.read_float(), self.read_float(), self.read_float(), self.read_float()
+    def read_color4(self) -> classes.ColorRGBA:
+        return classes.ColorRGBA(
+            r=self.read_float(),
+            g=self.read_float(),
+            b=self.read_float(),
+            a=self.read_float(),
         )
 
     def read_byte_array(self) -> bytes:
         return self.read(self.read_int())
 
-    def read_matrix(self) -> Matrix4x4:
-        return Matrix4x4(self.read_float_array(16))
+    def read_matrix(self) -> classes.Matrix4x4f:
+        return classes.Matrix4x4f.from_list(self.read_float_array(16))
 
     def read_array(self, command, length: int) -> list:
         return [command() for _ in range(length)]
@@ -232,13 +247,13 @@ class EndianBinaryReader:
     def read_string_array(self) -> List[str]:
         return self.read_array(self.read_aligned_string, self.read_int())
 
-    def read_vector2_array(self) -> List[Vector2]:
+    def read_vector2_array(self) -> List[classes.Vector2f]:
         return self.read_array(self.read_vector2, self.read_int())
 
-    def read_vector4_array(self) -> List[Vector4]:
+    def read_vector4_array(self) -> List[classes.Vector4f]:
         return self.read_array(self.read_vector4, self.read_int())
 
-    def read_matrix_array(self) -> List[Matrix4x4]:
+    def read_matrix_array(self) -> List[classes.Matrix4x4f]:
         return self.read_array(self.read_matrix, self.read_int())
 
     def real_offset(self) -> int:
@@ -366,17 +381,17 @@ class EndianBinaryReader_Memoryview_LittleEndian(EndianBinaryReader_Memoryview):
     def read_vector2(self):
         (x, y) = unpack_little_vector2_from(self.view, self.Position)
         self.Position += 8
-        return Vector2(x, y)
+        return classes.Vector2f(x=x, y=y)
 
     def read_vector3(self):
         (x, y, z) = unpack_little_vector3_from(self.view, self.Position)
         self.Position += 12
-        return Vector3(x, y, z)
+        return classes.Vector3f(x=x, y=y, z=z)
 
     def read_vector4(self):
         (x, y, z, w) = unpack_little_vector4_from(self.view, self.Position)
         self.Position += 16
-        return Vector4(x, y, z, w)
+        return classes.Vector4f(x=x, y=y, z=z, w=w)
 
 
 class EndianBinaryReader_Memoryview_BigEndian(EndianBinaryReader_Memoryview):
@@ -428,17 +443,17 @@ class EndianBinaryReader_Memoryview_BigEndian(EndianBinaryReader_Memoryview):
     def read_vector2(self):
         (x, y) = unpack_big_vector2_from(self.view, self.Position)
         self.Position += 8
-        return Vector2(x, y)
+        return classes.Vector2(x=x, y=y)
 
     def read_vector3(self):
         (x, y, z) = unpack_big_vector3_from(self.view, self.Position)
         self.Position += 12
-        return Vector3(x, y, z)
+        return classes.Vector3(x=x, y=y, z=z)
 
     def read_vector4(self):
         (x, y, z, w) = unpack_big_vector4_from(self.view, self.Position)
         self.Position += 16
-        return Vector4(x, y, z, w)
+        return classes.Vector4(x=x, y=y, z=z, w=w)
 
 
 class EndianBinaryReader_Streamable(EndianBinaryReader):

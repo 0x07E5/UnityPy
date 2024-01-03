@@ -3,7 +3,7 @@ from enum import IntEnum, IntFlag
 from struct import Struct
 from io import BytesIO
 from typing import List, Tuple, Any, Dict
-from .TypeTreeHelper import TypeTreeNode
+from .TypeTreeNode import TypeTreeNode
 
 TPKTYPETREE: TpkTypeTreeBlob = None
 NODES_CACHE: dict = {}
